@@ -292,4 +292,314 @@
                             <div class="text-xs text-gray-400 mb-2">${item.pieces}</div>
                             
                             <div class="mt-auto space-y-2 mb-3">
-                           
+                                ${item.hasSizes ? `
+                                    <select id="size-${item.id}" onchange="updateCardUI('${item.id}')" class="w-full bg-gray-900 border border-gray-700 text-white text-xs rounded-lg p-2 outline-none focus:border-brand-orange transition">
+                                        ${item.sizes.map(s => `<option value="${s.n}">${s.n} - ₹${s.p}</option>`).join('')}
+                                    </select>
+                                ` : ''}
+                                
+                                ${item.hasFlavors ? `
+                                    <select id="flavor-${item.id}" onchange="updateCardUI('${item.id}')" class="w-full bg-gray-900 border border-gray-700 text-white text-xs rounded-lg p-2 outline-none focus:border-brand-orange transition">
+                                        ${item.flavors.map(f => `<option value="${f}">${f}</option>`).join('')}
+                                    </select>
+                                ` : ''}
+                            </div>
+                            
+                            <div class="flex items-center justify-between mt-auto">
+                                <div id="price-${item.id}" class="text-lg font-black text-brand-yellow">₹${item.price > 0 ? item.price : item.sizes[0].p}</div>
+                                <div id="action-${item.id}" class="w-1/2">
+                                    </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                if (item.type === 'veg') vegHTML += cardHTML;
+                else nonVegHTML += cardHTML;
+            });
+
+            vegContainer.innerHTML = vegHTML;
+            nonVegContainer.innerHTML = nonVegHTML;
+
+            // Initialize all card UI states
+            menuData.forEach(item => updateCardUI(item.id));
+        }
+
+        // --- Logic: Variant Helpers ---
+        function getCartKey(id, size, flavor) {
+            return `${id}|${size || 'none'}|${flavor || 'none'}`;
+        }
+
+        function getItemConfig(id) {
+            const item = menuData.find(i => i.id === id);
+            const sizeEl = document.getElementById(`size-${id}`);
+            const flavorEl = document.getElementById(`flavor-${id}`);
+            
+            let size = sizeEl ? sizeEl.value : null;
+            let flavor = flavorEl ? flavorEl.value : null;
+            
+            let price = item.price;
+            if (item.hasSizes) {
+                const sObj = item.sizes.find(s => s.n === size);
+                if (sObj) price = sObj.p;
+            }
+
+            return { item, size, flavor, price, key: getCartKey(id, size, flavor) };
+        }
+
+        // --- Logic: Dynamic Card Button UI ---
+        function updateCardUI(id) {
+            const config = getItemConfig(id);
+            const actionContainer = document.getElementById(`action-${id}`);
+            const priceContainer = document.getElementById(`price-${id}`);
+            
+            // Update Price Display dynamically
+            priceContainer.innerText = `₹${config.price}`;
+
+            // Check if this exact variant is in cart
+            const cartItem = cart[config.key];
+
+            if (cartItem && cartItem.qty > 0) {
+                actionContainer.innerHTML = `
+                    <div class="flex items-center justify-between bg-brand-orange rounded-lg p-1 text-white shadow-md">
+                        <button onclick="updateQty('${config.key}', -1)" class="w-7 h-7 flex items-center justify-center bg-white/20 rounded hover:bg-white/30 transition active:scale-90"><i class="fa-solid fa-minus text-xs"></i></button>
+                        <span class="font-bold text-sm px-1">${cartItem.qty}</span>
+                        <button onclick="updateQty('${config.key}', 1)" class="w-7 h-7 flex items-center justify-center bg-white/20 rounded hover:bg-white/30 transition active:scale-90"><i class="fa-solid fa-plus text-xs"></i></button>
+                    </div>
+                `;
+            } else {
+                actionContainer.innerHTML = `
+                    <button onclick="addToCart('${id}')" class="w-full bg-white text-brand-dark font-bold py-1.5 rounded-lg border border-gray-300 hover:bg-brand-orange hover:text-white hover:border-brand-orange transition active:scale-95 shadow-sm text-sm">
+                        ADD
+                    </button>
+                `;
+            }
+        }
+
+        // --- Logic: Cart Operations ---
+        function addToCart(id) {
+            const config = getItemConfig(id);
+            
+            if (!cart[config.key]) {
+                cart[config.key] = {
+                    baseId: id,
+                    name: config.item.name,
+                    size: config.size,
+                    flavor: config.flavor,
+                    price: config.price,
+                    qty: 1
+                };
+            } else {
+                cart[config.key].qty += 1;
+            }
+            
+            refreshGlobalState();
+            
+            // Add a small bounce animation to the floating cart
+            const floatBtn = document.getElementById('floating-cart-btn');
+            floatBtn.classList.add('scale-110');
+            setTimeout(() => floatBtn.classList.remove('scale-110'), 200);
+        }
+
+        function updateQty(key, delta) {
+            if (cart[key]) {
+                cart[key].qty += delta;
+                if (cart[key].qty <= 0) {
+                    delete cart[key];
+                }
+            }
+            refreshGlobalState();
+        }
+
+        function refreshGlobalState() {
+            // Update all cards UI (in case multiple variants exist, update all or just brute force update all cards)
+            menuData.forEach(item => updateCardUI(item.id));
+            updateCartUI();
+        }
+
+        // --- Logic: Cart UI Rendering & Calculations ---
+        function updateCartUI() {
+            const cartItemsContainer = document.getElementById('cart-items-container');
+            const cartFooter = document.getElementById('cart-footer');
+            const emptyMsg = document.getElementById('empty-cart-msg');
+            const badge = document.getElementById('cart-badge');
+            const floatingBtn = document.getElementById('floating-cart-btn');
+            const floatTotal = document.getElementById('floating-cart-total');
+            
+            let totalItems = 0;
+            let itemTotal = 0;
+            let html = '';
+
+            for (const key in cart) {
+                const c = cart[key];
+                totalItems += c.qty;
+                itemTotal += (c.price * c.qty);
+
+                let variantText = [];
+                if (c.size) variantText.push(c.size);
+                if (c.flavor) variantText.push(c.flavor);
+                const subtext = variantText.length > 0 ? `<div class="text-xs text-brand-orange">${variantText.join(' - ')}</div>` : '';
+
+                html += `
+                    <div class="flex items-center gap-3 bg-gray-800 p-3 rounded-xl border border-gray-700">
+                        <div class="flex-1">
+                            <h4 class="font-bold text-sm text-white">${c.name}</h4>
+                            ${subtext}
+                            <div class="text-sm font-semibold text-brand-yellow mt-1">₹${c.price}</div>
+                        </div>
+                        <div class="flex items-center gap-3 bg-gray-900 rounded-lg p-1 border border-gray-700">
+                            <button onclick="updateQty('${key}', -1)" class="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-white transition active:scale-90"><i class="fa-solid fa-minus text-xs"></i></button>
+                            <span class="font-bold text-white min-w-[1ch] text-center">${c.qty}</span>
+                            <button onclick="updateQty('${key}', 1)" class="w-8 h-8 flex items-center justify-center text-brand-orange hover:text-brand-yellow transition active:scale-90"><i class="fa-solid fa-plus text-xs"></i></button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Calculations
+            let isFreeDelivery = itemTotal >= 300;
+            let finalDelFee = isFreeDelivery ? 0 : (totalItems > 0 ? deliveryCharge : 0);
+            let grandTotal = itemTotal + finalDelFee;
+
+            // DOM Updates
+            badge.innerText = totalItems;
+            floatTotal.innerText = `₹${grandTotal}`;
+
+            if (totalItems > 0) {
+                floatingBtn.classList.remove('hidden');
+                floatingBtn.classList.add('flex');
+                emptyMsg.classList.add('hidden');
+                cartFooter.classList.remove('hidden');
+                cartFooter.classList.add('flex');
+                cartItemsContainer.innerHTML = html;
+            } else {
+                floatingBtn.classList.add('hidden');
+                floatingBtn.classList.remove('flex');
+                emptyMsg.classList.remove('hidden');
+                cartFooter.classList.add('hidden');
+                cartFooter.classList.remove('flex');
+                cartItemsContainer.innerHTML = emptyMsg.outerHTML; // Keep empty msg
+                if(isCartOpen) toggleCart(); // auto close if emptied
+            }
+
+            // Summary Updates
+            document.getElementById('summary-item-total').innerText = `₹${itemTotal}`;
+            document.getElementById('summary-grand-total').innerText = `₹${grandTotal}`;
+            
+            const delValue = document.getElementById('del-value');
+            const delStrike = document.getElementById('del-strike');
+            
+            if (isFreeDelivery) {
+                delStrike.classList.remove('hidden');
+                delValue.innerText = 'FREE';
+                delValue.classList.add('text-green-500');
+                delValue.classList.remove('text-white');
+            } else {
+                delStrike.classList.add('hidden');
+                delValue.innerText = `₹${deliveryCharge}`;
+                delValue.classList.remove('text-green-500');
+                delValue.classList.add('text-white');
+            }
+
+            updateOfferBanner(itemTotal);
+        }
+
+        // --- Logic: Offers System ---
+        function updateOfferBanner(total) {
+            const banner = document.getElementById('cart-offer-banner');
+            if (total === 0) {
+                banner.innerHTML = "Add items to unlock exciting offers!";
+                return;
+            }
+
+            if (total < 180) {
+                const diff = 180 - total;
+                banner.innerHTML = `<span class="text-white">Add <strong class="text-brand-yellow">₹${diff}</strong> more to get <strong class="text-green-400">FREE Limonata</strong></span>`;
+            } else if (total >= 180 && total < 300) {
+                const diff = 300 - total;
+                banner.innerHTML = `
+                    <div class="text-green-400 font-bold mb-1">🎉 You unlocked FREE Limonata!</div>
+                    <div class="text-white text-xs">Add <strong class="text-brand-yellow">₹${diff}</strong> more to unlock <strong class="text-blue-300">FREE Cold Drink + FREE Delivery</strong></div>
+                `;
+            } else {
+                banner.innerHTML = `<div class="text-green-400 font-bold text-sm tracking-wide">🎉 FREE Cold Drink + FREE Delivery Unlocked!</div>`;
+            }
+        }
+
+        // --- UI: Toggle Cart ---
+        function toggleCart() {
+            const overlay = document.getElementById('cart-overlay');
+            const sidebar = document.getElementById('cart-sidebar');
+            const body = document.body;
+
+            if (!isCartOpen) {
+                overlay.classList.remove('hidden');
+                // slight delay for transition
+                setTimeout(() => {
+                    overlay.classList.remove('opacity-0');
+                    overlay.classList.add('opacity-100');
+                    sidebar.classList.remove('translate-x-full');
+                }, 10);
+                body.style.overflow = 'hidden';
+                isCartOpen = true;
+            } else {
+                overlay.classList.remove('opacity-100');
+                overlay.classList.add('opacity-0');
+                sidebar.classList.add('translate-x-full');
+                setTimeout(() => {
+                    overlay.classList.add('hidden');
+                }, 300);
+                body.style.overflow = '';
+                isCartOpen = false;
+            }
+        }
+
+        // --- Logic: WhatsApp Checkout Integration ---
+        function checkoutWhatsApp() {
+            let itemTotal = 0;
+            let totalItems = 0;
+            let orderText = `*Hello Nalam Mini Mart Snacks,*\n_I want to order:_\n\n`;
+
+            for (const key in cart) {
+                const c = cart[key];
+                totalItems += c.qty;
+                const sub = c.price * c.qty;
+                itemTotal += sub;
+
+                let vars = [];
+                if (c.size) vars.push(c.size);
+                if (c.flavor) vars.push(c.flavor);
+                const varString = vars.length > 0 ? ` (${vars.join(' - ')})` : '';
+
+                orderText += `▪️ *${c.name}*${varString}  x${c.qty} = ₹${sub}\n`;
+            }
+
+            if(totalItems === 0) return;
+
+            let isFreeDelivery = itemTotal >= 300;
+            let finalDelFee = isFreeDelivery ? 0 : deliveryCharge;
+            let grandTotal = itemTotal + finalDelFee;
+
+            orderText += `\n------------------------\n`;
+            orderText += `*Item Total:* ₹${itemTotal}\n`;
+            orderText += `*Delivery Fee:* ${isFreeDelivery ? '~₹40~ FREE' : '₹40'}\n`;
+            orderText += `*Grand Total:* ₹${grandTotal}\n`;
+            orderText += `------------------------\n`;
+
+            // Offers
+            if (itemTotal >= 300) {
+                orderText += `🎁 *Offer Unlocked:* FREE Cold Drink + FREE Delivery\n`;
+            } else if (itemTotal >= 180) {
+                orderText += `🎁 *Offer Unlocked:* FREE Limonata\n`;
+            }
+
+            orderText += `\n_Please confirm my order._`;
+
+            const encodedMsg = encodeURIComponent(orderText);
+            const waLink = `https://wa.me/${phoneNo}?text=${encodedMsg}`;
+            
+            window.open(waLink, '_blank');
+        }
+    </script>
+</body>
+</html>
